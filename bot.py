@@ -1,5 +1,7 @@
+```python
 import os
 import asyncio
+import sqlite3
 from pathlib import Path
 
 from telegram import Update
@@ -19,17 +21,180 @@ BASE_DIR = Path(__file__).resolve().parent
 DOWNLOAD_DIR = BASE_DIR / "downloads"
 DOWNLOAD_DIR.mkdir(exist_ok=True)
 
+DATABASE_FILE = BASE_DIR / "bot.db"
+
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 
+# ضع Telegram User ID الخاص بك هنا
+# مثال: ADMIN_ID = 123456789
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+
+
+# =========================
+# Database
+# =========================
+
+def init_database():
+    with sqlite3.connect(DATABASE_FILE) as connection:
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT,
+                first_name TEXT,
+                last_name TEXT,
+                first_seen TEXT DEFAULT CURRENT_TIMESTAMP,
+                last_seen TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        connection.commit()
+
+
+def save_user(user):
+    with sqlite3.connect(DATABASE_FILE) as connection:
+        connection.execute("""
+            INSERT INTO users (
+                user_id,
+                username,
+                first_name,
+                last_name
+            )
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                username = excluded.username,
+                first_name = excluded.first_name,
+                last_name = excluded.last_name,
+                last_seen = CURRENT_TIMESTAMP
+        """, (
+            user.id,
+            user.username,
+            user.first_name,
+            user.last_name,
+        ))
+
+        connection.commit()
+
+
+def get_users():
+    with sqlite3.connect(DATABASE_FILE) as connection:
+        cursor = connection.execute("""
+            SELECT
+                user_id,
+                username,
+                first_name,
+                last_name,
+                first_seen,
+                last_seen
+            FROM users
+            ORDER BY first_seen DESC
+        """)
+
+        return cursor.fetchall()
+
+
+def get_users_count():
+    with sqlite3.connect(DATABASE_FILE) as connection:
+        cursor = connection.execute(
+            "SELECT COUNT(*) FROM users"
+        )
+
+        return cursor.fetchone()[0]
+
+
+# =========================
+# Start
+# =========================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user = update.effective_user
+
+    # تسجيل المستخدم
+    save_user(user)
+
     await update.message.reply_text(
         "👋 أهلاً بك في بوت تحميل الفيديوهات.\n\n"
         "📎 أرسل رابط فيديو وسأحاول تحميله لك."
     )
 
 
+# =========================
+# Users - Admin
+# =========================
+
+async def users_command(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+
+    user = update.effective_user
+
+    # السماح للأدمن فقط
+    if user.id != ADMIN_ID:
+        await update.message.reply_text(
+            "❌ ليس لديك صلاحية استخدام هذا الأمر."
+        )
+        return
+
+    users = get_users()
+
+    if not users:
+        await update.message.reply_text(
+            "👥 لا يوجد مستخدمون مسجلون حتى الآن."
+        )
+        return
+
+    count = len(users)
+
+    # Telegram لديه حد لحجم الرسالة،
+    # لذلك نقسم المستخدمين إلى رسائل.
+    message = f"👥 إجمالي المستخدمين: {count}\n\n"
+
+    for index, row in enumerate(users, start=1):
+
+        user_id = row[0]
+        username = row[1]
+        first_name = row[2] or ""
+        last_name = row[3] or ""
+        first_seen = row[4]
+        last_seen = row[5]
+
+        full_name = f"{first_name} {last_name}".strip()
+
+        username_text = (
+            f"@{username}"
+            if username
+            else "لا يوجد"
+        )
+
+        user_text = (
+            f"{index}. 👤 {full_name}\n"
+            f"   🆔 ID: {user_id}\n"
+            f"   📱 Username: {username_text}\n"
+            f"   🟢 أول استخدام: {first_seen}\n"
+            f"   🔵 آخر استخدام: {last_seen}\n\n"
+        )
+
+        if len(message) + len(user_text) > 3500:
+
+            await update.message.reply_text(message)
+
+            message = user_text
+
+        else:
+            message += user_text
+
+    if message.strip():
+
+        await update.message.reply_text(message)
+
+
+# =========================
+# Download
+# =========================
+
 def download_video(url: str, output_template: str):
+
     options = {
         "format": "best[ext=mp4]/best",
         "outtmpl": output_template,
@@ -42,13 +207,22 @@ def download_video(url: str, output_template: str):
         ydl.download([url])
 
 
-async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_url(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+
+    # تسجيل المستخدم حتى لو لم يرسل /start
+    save_user(update.effective_user)
+
     url = (update.message.text or "").strip()
 
     if not url.startswith(("http://", "https://")):
+
         await update.message.reply_text(
             "❌ أرسل رابطًا صحيحًا يبدأ بـ http:// أو https://"
         )
+
         return
 
     status = await update.message.reply_text(
@@ -62,6 +236,7 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     try:
+
         await asyncio.to_thread(
             download_video,
             url,
@@ -70,11 +245,14 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         files = [
             p
-            for p in DOWNLOAD_DIR.glob(f"{user_id}_*")
+            for p in DOWNLOAD_DIR.glob(
+                f"{user_id}_*"
+            )
             if p.is_file()
         ]
 
         if not files:
+
             raise RuntimeError(
                 "لم يتم العثور على الملف بعد التحميل."
             )
@@ -89,14 +267,18 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         with video_file.open("rb") as video:
+
             await update.message.reply_video(
                 video=video,
                 caption="✅ تم تحميل الفيديو بنجاح",
             )
 
-        video_file.unlink(missing_ok=True)
+        video_file.unlink(
+            missing_ok=True
+        )
 
     except Exception as exc:
+
         print(f"ERROR: {exc}")
 
         await status.edit_text(
@@ -108,19 +290,40 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for file in DOWNLOAD_DIR.glob(
             f"{user_id}_*"
         ):
+
             try:
-                file.unlink(missing_ok=True)
+
+                file.unlink(
+                    missing_ok=True
+                )
+
             except OSError:
                 pass
 
 
+# =========================
+# Main
+# =========================
+
 def main():
+
     if not BOT_TOKEN:
+
         raise RuntimeError(
             "BOT_TOKEN غير موجود في Railway Variables."
         )
 
+    if not ADMIN_ID:
+
+        raise RuntimeError(
+            "ADMIN_ID غير موجود في Railway Variables."
+        )
+
+    # إنشاء قاعدة البيانات
+    init_database()
+
     print("BOT_TOKEN موجود:", bool(BOT_TOKEN))
+    print("ADMIN_ID:", ADMIN_ID)
 
     app = (
         Application
@@ -130,7 +333,17 @@ def main():
     )
 
     app.add_handler(
-        CommandHandler("start", start)
+        CommandHandler(
+            "start",
+            start
+        )
+    )
+
+    app.add_handler(
+        CommandHandler(
+            "users",
+            users_command
+        )
     )
 
     app.add_handler(
@@ -147,3 +360,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+```
