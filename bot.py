@@ -1,4 +1,3 @@
-
 import os
 import asyncio
 import sqlite3
@@ -54,6 +53,9 @@ def init_database():
 
 
 def save_user(user):
+    if user is None:
+        return
+
     with sqlite3.connect(DATABASE_FILE) as connection:
         connection.execute("""
             INSERT INTO users (
@@ -106,8 +108,12 @@ async def start(
 ):
     user = update.effective_user
 
-    # تسجيل المستخدم
     save_user(user)
+
+    print(
+        f"START: user_id={user.id}, "
+        f"username={user.username}"
+    )
 
     await update.message.reply_text(
         "👋 أهلاً بك في بوت تحميل الفيديوهات.\n\n"
@@ -124,6 +130,11 @@ async def users_command(
     context: ContextTypes.DEFAULT_TYPE,
 ):
     user = update.effective_user
+
+    print(
+        f"USERS COMMAND: user_id={user.id}, "
+        f"ADMIN_ID={ADMIN_ID}"
+    )
 
     # التحقق من الأدمن
     if user.id != ADMIN_ID:
@@ -173,7 +184,7 @@ async def users_command(
             f"   🔵 آخر استخدام: {last_seen}\n\n"
         )
 
-        # تقسيم الرسائل إذا أصبحت كبيرة
+        # تقسيم الرسالة إذا أصبحت كبيرة
         if len(message) + len(user_text) > 3500:
 
             await update.message.reply_text(message)
@@ -215,13 +226,21 @@ async def handle_url(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ):
-    # تسجيل المستخدم حتى لو لم يرسل /start
-    save_user(update.effective_user)
+    user = update.effective_user
+
+    # تسجيل المستخدم
+    save_user(user)
+
+    print(
+        f"MESSAGE: user_id={user.id}, "
+        f"username={user.username}"
+    )
 
     url = (
         update.message.text or ""
     ).strip()
 
+    # التحقق من الرابط
     if not url.startswith(
         ("http://", "https://")
     ):
@@ -235,7 +254,7 @@ async def handle_url(
         "⏳ جاري تحميل الفيديو..."
     )
 
-    user_id = update.effective_user.id
+    user_id = user.id
 
     output_template = str(
         DOWNLOAD_DIR
@@ -264,7 +283,7 @@ async def handle_url(
                 "لم يتم العثور على الملف بعد التحميل."
             )
 
-        # أحدث ملف
+        # الحصول على أحدث ملف
         video_file = max(
             files,
             key=lambda p: p.stat().st_mtime
@@ -316,11 +335,13 @@ async def handle_url(
 
 def main():
 
+    # التحقق من BOT_TOKEN
     if not BOT_TOKEN:
         raise RuntimeError(
             "BOT_TOKEN غير موجود في Railway Variables."
         )
 
+    # التحقق من ADMIN_ID
     if not ADMIN_ID:
         raise RuntimeError(
             "ADMIN_ID غير موجود في Railway Variables."
@@ -328,6 +349,10 @@ def main():
 
     # إنشاء قاعدة البيانات
     init_database()
+
+    print(
+        "=========================================="
+    )
 
     print(
         "BOT_TOKEN موجود:",
@@ -339,6 +364,16 @@ def main():
         ADMIN_ID
     )
 
+    print(
+        "DATABASE:",
+        DATABASE_FILE
+    )
+
+    print(
+        "=========================================="
+    )
+
+    # إنشاء تطبيق Telegram
     app = (
         Application
         .builder()
@@ -346,7 +381,10 @@ def main():
         .build()
     )
 
+    # ======================================
     # /start
+    # ======================================
+
     app.add_handler(
         CommandHandler(
             "start",
@@ -354,7 +392,10 @@ def main():
         )
     )
 
+    # ======================================
     # /users
+    # ======================================
+
     app.add_handler(
         CommandHandler(
             "users",
@@ -362,11 +403,13 @@ def main():
         )
     )
 
+    # ======================================
     # استقبال الروابط
+    # ======================================
+
     app.add_handler(
         MessageHandler(
-            filters.TEXT
-            & ~filters.COMMAND,
+            filters.TEXT & ~filters.COMMAND,
             handle_url,
         )
     )
@@ -375,9 +418,13 @@ def main():
         "🤖 Bot is running..."
     )
 
+    # تشغيل البوت
     app.run_polling()
 
 
+# ==========================================
+# نقطة البداية
+# ==========================================
+
 if __name__ == "__main__":
     main()
-```
