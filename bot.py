@@ -48,7 +48,6 @@ def init_database():
                 last_seen TEXT DEFAULT CURRENT_TIMESTAMP
             )
         """)
-
         connection.commit()
 
 
@@ -136,7 +135,6 @@ async def users_command(
         f"ADMIN_ID={ADMIN_ID}"
     )
 
-    # التحقق من الأدمن
     if user.id != ADMIN_ID:
         await update.message.reply_text(
             "❌ ليس لديك صلاحية استخدام هذا الأمر."
@@ -151,9 +149,7 @@ async def users_command(
         )
         return
 
-    message = (
-        f"👥 إجمالي المستخدمين: {len(users)}\n\n"
-    )
+    message = f"👥 إجمالي المستخدمين: {len(users)}\n\n"
 
     for index, row in enumerate(users, start=1):
 
@@ -164,9 +160,7 @@ async def users_command(
         first_seen = row[4]
         last_seen = row[5]
 
-        full_name = (
-            f"{first_name} {last_name}"
-        ).strip()
+        full_name = f"{first_name} {last_name}".strip()
 
         if not full_name:
             full_name = "بدون اسم"
@@ -184,13 +178,9 @@ async def users_command(
             f"   🔵 آخر استخدام: {last_seen}\n\n"
         )
 
-        # تقسيم الرسالة إذا أصبحت كبيرة
         if len(message) + len(user_text) > 3500:
-
             await update.message.reply_text(message)
-
             message = user_text
-
         else:
             message += user_text
 
@@ -228,7 +218,6 @@ async def handle_url(
 ):
     user = update.effective_user
 
-    # تسجيل المستخدم
     save_user(user)
 
     print(
@@ -236,14 +225,9 @@ async def handle_url(
         f"username={user.username}"
     )
 
-    url = (
-        update.message.text or ""
-    ).strip()
+    url = (update.message.text or "").strip()
 
-    # التحقق من الرابط
-    if not url.startswith(
-        ("http://", "https://")
-    ):
+    if not url.startswith(("http://", "https://")):
         await update.message.reply_text(
             "❌ أرسل رابطًا صحيحًا يبدأ بـ "
             "http:// أو https://"
@@ -257,13 +241,11 @@ async def handle_url(
     user_id = user.id
 
     output_template = str(
-        DOWNLOAD_DIR
-        / f"{user_id}_%(id)s.%(ext)s"
+        DOWNLOAD_DIR / f"{user_id}_%(id)s.%(ext)s"
     )
 
     try:
 
-        # التحميل بدون تجميد البوت
         await asyncio.to_thread(
             download_video,
             url,
@@ -272,9 +254,7 @@ async def handle_url(
 
         files = [
             p
-            for p in DOWNLOAD_DIR.glob(
-                f"{user_id}_*"
-            )
+            for p in DOWNLOAD_DIR.glob(f"{user_id}_*")
             if p.is_file()
         ]
 
@@ -283,7 +263,6 @@ async def handle_url(
                 "لم يتم العثور على الملف بعد التحميل."
             )
 
-        # الحصول على أحدث ملف
         video_file = max(
             files,
             key=lambda p: p.stat().st_mtime
@@ -294,22 +273,16 @@ async def handle_url(
         )
 
         with video_file.open("rb") as video:
-
             await update.message.reply_video(
                 video=video,
                 caption="✅ تم تحميل الفيديو بنجاح",
             )
 
-        # حذف الملف بعد الإرسال
-        video_file.unlink(
-            missing_ok=True
-        )
+        video_file.unlink(missing_ok=True)
 
     except Exception as exc:
 
-        print(
-            f"ERROR: {exc}"
-        )
+        print(f"ERROR: {exc}")
 
         await status.edit_text(
             "❌ تعذر تحميل الفيديو.\n\n"
@@ -317,14 +290,11 @@ async def handle_url(
             "المحتوى غير متاح للتنزيل."
         )
 
-        # تنظيف الملفات المؤقتة
         for file in DOWNLOAD_DIR.glob(
             f"{user_id}_*"
         ):
             try:
-                file.unlink(
-                    missing_ok=True
-                )
+                file.unlink(missing_ok=True)
             except OSError:
                 pass
 
@@ -335,55 +305,30 @@ async def handle_url(
 
 def main():
 
-    # التحقق من BOT_TOKEN
     if not BOT_TOKEN:
         raise RuntimeError(
             "BOT_TOKEN غير موجود في Railway Variables."
         )
 
-    # التحقق من ADMIN_ID
     if not ADMIN_ID:
         raise RuntimeError(
             "ADMIN_ID غير موجود في Railway Variables."
         )
 
-    # إنشاء قاعدة البيانات
     init_database()
 
-    print(
-        "=========================================="
-    )
+    print("==========================================")
+    print("BOT_TOKEN موجود:", bool(BOT_TOKEN))
+    print("ADMIN_ID:", ADMIN_ID)
+    print("DATABASE:", DATABASE_FILE)
+    print("==========================================")
 
-    print(
-        "BOT_TOKEN موجود:",
-        bool(BOT_TOKEN)
-    )
-
-    print(
-        "ADMIN_ID:",
-        ADMIN_ID
-    )
-
-    print(
-        "DATABASE:",
-        DATABASE_FILE
-    )
-
-    print(
-        "=========================================="
-    )
-
-    # إنشاء تطبيق Telegram
     app = (
         Application
         .builder()
         .token(BOT_TOKEN)
         .build()
     )
-
-    # ======================================
-    # /start
-    # ======================================
 
     app.add_handler(
         CommandHandler(
@@ -392,20 +337,12 @@ def main():
         )
     )
 
-    # ======================================
-    # /users
-    # ======================================
-
     app.add_handler(
         CommandHandler(
             "users",
             users_command
         )
     )
-
-    # ======================================
-    # استقبال الروابط
-    # ======================================
 
     app.add_handler(
         MessageHandler(
@@ -414,11 +351,8 @@ def main():
         )
     )
 
-    print(
-        "🤖 Bot is running..."
-    )
+    print("🤖 Bot is running...")
 
-    # تشغيل البوت
     app.run_polling()
 
 
